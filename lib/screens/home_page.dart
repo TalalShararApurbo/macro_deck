@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../widgets/macro_button.dart';
+import 'settings_page.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
@@ -12,9 +13,10 @@ class HomePage extends StatelessWidget {
         title: const Text(
           'MACRO-DECK',
           style: TextStyle(
+            fontFamily: 'monospace',
             fontWeight: FontWeight.bold,
-            letterSpacing: 2.0,
-            fontSize: 18.0,
+            letterSpacing: 4.0,
+            fontSize: 22.0,
           ),
         ),
         backgroundColor: Colors.black,
@@ -39,16 +41,25 @@ class HomePage extends StatelessWidget {
                     shrinkWrap: true,
                     childAspectRatio: 1.0,
                     physics: const AlwaysScrollableScrollPhysics(),
-                    children: const [
-                      MacroButton(label: 'Stream', icon: Icons.sensors),
-                      MacroButton(label: 'Record', icon: Icons.fiber_manual_record),
-                      MacroButton(label: 'Clips', icon: Icons.movie_creation),
-                      MacroButton(label: 'Mic Mute', icon: Icons.mic_off, isToggle: true),
-                      MacroButton(label: 'Deafen', icon: Icons.headset_off, isToggle: true),
-                      MacroButton(label: 'Camera', icon: Icons.videocam_off, isToggle: true),
-                      MacroButton(label: 'Scene 1', icon: Icons.looks_one),
-                      MacroButton(label: 'Scene 2', icon: Icons.looks_two),
-                      MacroButton(label: 'Settings', icon: Icons.settings),
+                    children: [
+                      const MacroButton(label: 'Stream', icon: Icons.sensors),
+                      const MacroButton(label: 'Record', icon: Icons.fiber_manual_record),
+                      const MacroButton(label: 'Clips', icon: Icons.movie_creation),
+                      const MacroButton(label: 'Mic Mute', icon: Icons.mic_off, isToggle: true),
+                      const MacroButton(label: 'Deafen', icon: Icons.headset_off, isToggle: true),
+                      const MacroButton(label: 'Camera', icon: Icons.videocam_off, isToggle: true),
+                      const MacroButton(label: 'Scene 1', icon: Icons.looks_one),
+                      const MacroButton(label: 'Scene 2', icon: Icons.looks_two),
+                      MacroButton(
+                        label: 'Settings', 
+                        icon: Icons.settings,
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (context) => const SettingsPage()),
+                          );
+                        },
+                      ),
                     ],
                   ),
                 );
