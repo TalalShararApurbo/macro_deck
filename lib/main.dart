@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'screens/home_page.dart';
+import 'services/preferences_service.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await PreferencesService.init();
   runApp(const MacroDeckApp());
 }
 
