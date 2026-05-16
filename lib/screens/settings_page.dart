@@ -9,8 +9,6 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  bool _hapticsEnabled = true;
-  bool _animationsEnabled = true;
 
   final TextEditingController _ipController = TextEditingController();
   final TextEditingController _portController = TextEditingController();
@@ -111,39 +109,6 @@ class _SettingsPageState extends State<SettingsPage> {
             child: const Text('Save Configuration', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
           const SizedBox(height: 32.0),
-          const Text(
-            'Preferences',
-            style: TextStyle(
-              color: Colors.lightBlueAccent,
-              fontSize: 16.0,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 16.0),
-          SwitchListTile(
-            title: const Text('Enable Haptic Feedback', style: TextStyle(color: Colors.white)),
-            subtitle: const Text('Simulate physical button presses', style: TextStyle(color: Colors.white54)),
-            activeTrackColor: Colors.lightBlueAccent.withValues(alpha: 0.5),
-            activeThumbColor: Colors.lightBlueAccent,
-            value: _hapticsEnabled,
-            onChanged: (bool value) {
-              setState(() {
-                _hapticsEnabled = value;
-              });
-            },
-          ),
-          SwitchListTile(
-            title: const Text('Enable Button Animations', style: TextStyle(color: Colors.white)),
-            subtitle: const Text('Show scale and glow effects', style: TextStyle(color: Colors.white54)),
-            activeTrackColor: Colors.lightBlueAccent.withValues(alpha: 0.5),
-            activeThumbColor: Colors.lightBlueAccent,
-            value: _animationsEnabled,
-            onChanged: (bool value) {
-              setState(() {
-                _animationsEnabled = value;
-              });
-            },
-          ),
           const SizedBox(height: 32.0),
           const Center(
             child: Text(

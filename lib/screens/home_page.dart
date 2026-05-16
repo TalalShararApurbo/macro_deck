@@ -9,6 +9,7 @@ class HomePage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
         title: const Text(
           'MACRO-DECK',
@@ -56,7 +57,114 @@ class HomePage extends StatelessWidget {
                         onPressed: () {
                           Navigator.push(
                             context,
-                            MaterialPageRoute(builder: (context) => const SettingsPage()),
+                            PageRouteBuilder(
+                              pageBuilder: (context, animation, secondaryAnimation) => const SettingsPage(),
+                              transitionDuration: const Duration(milliseconds: 350),
+                              reverseTransitionDuration: const Duration(milliseconds: 350),
+                              opaque: false,
+                              transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                                final curvedAnimation = CurvedAnimation(
+                                  parent: animation,
+                                  curve: Curves.fastOutSlowIn,
+                                );
+                                
+                                final scaleAnimation = Tween<double>(begin: 0.85, end: 1.0).animate(curvedAnimation);
+                                final fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(curvedAnimation);
+
+                                return FadeTransition(
+                                  opacity: fadeAnimation,
+                                  child: ScaleTransition(
+                                    scale: scaleAnimation,
+                                    child: child,
+                                  ),
+                                );
+                              },
+                            ),
+                          );
+                        },
+                      ),
+                      MacroButton(
+                        label: 'ADD NEW',
+                        icon: Icons.add,
+                        onPressed: () {
+                          showGeneralDialog(
+                            context: context,
+                            barrierDismissible: true,
+                            barrierLabel: 'Dismiss',
+                            barrierColor: Colors.black.withValues(alpha: 0.5),
+                            transitionDuration: const Duration(milliseconds: 350),
+                            transitionBuilder: (context, animation, secondaryAnimation, child) {
+                              final curvedAnimation = CurvedAnimation(
+                                parent: animation,
+                                curve: Curves.fastOutSlowIn,
+                              );
+                              
+                              final scaleAnimation = Tween<double>(begin: 0.85, end: 1.0).animate(curvedAnimation);
+                              final fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(curvedAnimation);
+
+                              return FadeTransition(
+                                opacity: fadeAnimation,
+                                child: ScaleTransition(
+                                  scale: scaleAnimation,
+                                  child: child,
+                                ),
+                              );
+                            },
+                            pageBuilder: (context, animation, secondaryAnimation) {
+                              return AlertDialog(
+                                backgroundColor: Colors.black,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16.0),
+                                  side: const BorderSide(color: Colors.cyan, width: 2.0),
+                                ),
+                                title: const Text(
+                                  'ADD MACRO',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 2.0,
+                                  ),
+                                ),
+                                content: SingleChildScrollView(
+                                  child: TextField(
+                                    style: const TextStyle(color: Colors.white),
+                                    decoration: const InputDecoration(
+                                      labelText: 'Macro Name',
+                                      labelStyle: TextStyle(color: Colors.white54),
+                                      enabledBorder: OutlineInputBorder(
+                                        borderSide: BorderSide(color: Colors.white24),
+                                      ),
+                                      focusedBorder: OutlineInputBorder(
+                                        borderSide: BorderSide(color: Colors.cyan),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(context),
+                                    child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+                                  ),
+                                  ElevatedButton(
+                                    onPressed: () {
+                                      Navigator.pop(context);
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                          content: Text('Button configuration captured. Integration in progress...'),
+                                          backgroundColor: Colors.cyan,
+                                          behavior: SnackBarBehavior.floating,
+                                        ),
+                                      );
+                                    },
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.cyan,
+                                      foregroundColor: Colors.black,
+                                    ),
+                                    child: const Text('Save', style: TextStyle(fontWeight: FontWeight.bold)),
+                                  ),
+                                ],
+                              );
+                            },
                           );
                         },
                       ),
