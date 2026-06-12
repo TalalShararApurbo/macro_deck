@@ -26,4 +26,19 @@ class PreferencesService {
   static Future<void> setCustomMacros(List<String> value) async {
     await _prefs.setStringList(_customMacrosKey, value);
   }
+
+  static String get micMuteBind => _prefs.getString('bind_mic_mute') ?? '';
+  static Future<void> setMicMuteBind(String value) async {
+    await _prefs.setString('bind_mic_mute', value);
+  }
+
+  static String get deafenBind => _prefs.getString('bind_deafen') ?? '';
+  static Future<void> setDeafenBind(String value) async {
+    await _prefs.setString('bind_deafen', value);
+  }
+
+  static String get cameraBind => _prefs.getString('bind_camera') ?? '';
+  static Future<void> setCameraBind(String value) async {
+    await _prefs.setString('bind_camera', value);
+  }
 }

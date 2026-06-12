@@ -1,24 +1,29 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../widgets/macro_button.dart';
 import '../services/preferences_service.dart';
+import '../services/network_service.dart';
 import 'settings_page.dart';
 
 class CustomMacro {
   final String label;
   final String iconName;
   final bool isToggle;
+  final String? keyCombo;
 
   CustomMacro({
     required this.label,
     required this.iconName,
     required this.isToggle,
+    this.keyCombo,
   });
 
   Map<String, dynamic> toJson() => {
         'label': label,
         'iconName': iconName,
         'isToggle': isToggle,
+        'keyCombo': keyCombo,
       };
 
   factory CustomMacro.fromJson(Map<String, dynamic> json) {
@@ -26,6 +31,7 @@ class CustomMacro {
       label: json['label'] as String? ?? 'New Macro',
       iconName: json['iconName'] as String? ?? 'keyboard',
       isToggle: json['isToggle'] as bool? ?? false,
+      keyCombo: json['keyCombo'] as String?,
     );
   }
 }
@@ -78,6 +84,36 @@ IconData getIconByName(String name) {
       return Icons.code;
     case 'terminal':
       return Icons.terminal;
+    case 'power':
+      return Icons.power_settings_new;
+    case 'lock':
+      return Icons.lock_outline;
+    case 'refresh':
+      return Icons.refresh;
+    case 'folder':
+      return Icons.folder_open;
+    case 'link':
+      return Icons.link;
+    case 'brightness':
+      return Icons.brightness_6;
+    case 'search':
+      return Icons.search;
+    case 'mic':
+      return Icons.mic;
+    case 'headset':
+      return Icons.headset;
+    case 'camera':
+      return Icons.videocam;
+    case 'timer':
+      return Icons.timer_outlined;
+    case 'speed':
+      return Icons.speed;
+    case 'security':
+      return Icons.security;
+    case 'notifications':
+      return Icons.notifications_active;
+    case 'discord':
+      return Icons.forum;
     default:
       return Icons.help_outline;
   }
@@ -175,19 +211,65 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  void _showBuiltInRecordDialog(String currentBind, String title, Future<void> Function(String) onSave) async {
+    final String? result = await showGeneralDialog<String>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Dismiss',
+      barrierColor: Colors.black.withValues(alpha: 0.6),
+      transitionDuration: const Duration(milliseconds: 350),
+      transitionBuilder: (context, animation, secondaryAnimation, child) {
+        final curvedAnimation = CurvedAnimation(
+          parent: animation,
+          curve: Curves.fastOutSlowIn,
+        );
+        final scaleAnimation = Tween<double>(begin: 0.85, end: 1.0).animate(curvedAnimation);
+        final fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(curvedAnimation);
+
+        return FadeTransition(
+          opacity: fadeAnimation,
+          child: ScaleTransition(
+            scale: scaleAnimation,
+            child: child,
+          ),
+        );
+      },
+      pageBuilder: (context, animation, secondaryAnimation) {
+        return RecordBindDialog(
+          title: title,
+          initialBind: currentBind,
+        );
+      },
+    );
+
+    if (result != null) {
+      await onSave(result);
+      if (mounted) {
+        setState(() {}); // Trigger rebuild to reflect any state variables
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Bind for $title updated to: ${result.isEmpty ? "Default Action" : result.toUpperCase()}'),
+            backgroundColor: Colors.cyan,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
       resizeToAvoidBottomInset: false,
       appBar: AppBar(
-        title: const Text(
+        title: Text(
           'MACRO-DECK',
-          style: TextStyle(
-            fontFamily: 'monospace',
+          style: GoogleFonts.orbitron(
             fontWeight: FontWeight.bold,
             letterSpacing: 4.0,
             fontSize: 22.0,
+            color: Colors.cyanAccent,
           ),
         ),
         backgroundColor: Colors.black,
@@ -205,14 +287,96 @@ class _HomePageState extends State<HomePage> {
                 final List<Widget> gridItems = [];
                 
                 // 1. Built-in buttons
-                gridItems.add(const MacroButton(label: 'Stream', icon: Icons.sensors));
-                gridItems.add(const MacroButton(label: 'Record', icon: Icons.fiber_manual_record));
-                gridItems.add(const MacroButton(label: 'Clips', icon: Icons.movie_creation));
-                gridItems.add(const MacroButton(label: 'Mic Mute', icon: Icons.mic_off, isToggle: true));
-                gridItems.add(const MacroButton(label: 'Deafen', icon: Icons.headset_off, isToggle: true));
-                gridItems.add(const MacroButton(label: 'Camera', icon: Icons.videocam_off, isToggle: true));
-                gridItems.add(const MacroButton(label: 'Scene 1', icon: Icons.looks_one));
-                gridItems.add(const MacroButton(label: 'Scene 2', icon: Icons.looks_two));
+                gridItems.add(MacroButton(
+                  label: 'Stream', 
+                  icon: Icons.sensors,
+                  onPressed: () => NetworkService.sendCommand('STREAM'),
+                ));
+                gridItems.add(MacroButton(
+                  label: 'Record', 
+                  icon: Icons.fiber_manual_record,
+                  onPressed: () => NetworkService.sendCommand('RECORD'),
+                ));
+                gridItems.add(MacroButton(
+                  label: 'Mic Mute', 
+                  icon: Icons.mic_off, 
+                  isToggle: true,
+                  onPressed: () {
+                    final bind = PreferencesService.micMuteBind;
+                    if (bind.isNotEmpty) {
+                      NetworkService.sendCommand('RUN_MACRO:$bind');
+                    } else {
+                      NetworkService.sendCommand('MIC_MUTE');
+                    }
+                  },
+                  onLongPress: () {
+                    _showBuiltInRecordDialog(
+                      PreferencesService.micMuteBind,
+                      'Mic Mute',
+                      (val) async => await PreferencesService.setMicMuteBind(val),
+                    );
+                  },
+                ));
+                gridItems.add(MacroButton(
+                  label: 'Deafen', 
+                  icon: Icons.headset_off, 
+                  isToggle: true,
+                  onPressed: () {
+                    final bind = PreferencesService.deafenBind;
+                    if (bind.isNotEmpty) {
+                      NetworkService.sendCommand('RUN_MACRO:$bind');
+                    } else {
+                      NetworkService.sendCommand('DEAFEN');
+                    }
+                  },
+                  onLongPress: () {
+                    _showBuiltInRecordDialog(
+                      PreferencesService.deafenBind,
+                      'Deafen',
+                      (val) async => await PreferencesService.setDeafenBind(val),
+                    );
+                  },
+                ));
+                gridItems.add(MacroButton(
+                  label: 'Camera', 
+                  icon: Icons.videocam_off, 
+                  isToggle: true,
+                  onPressed: () {
+                    final bind = PreferencesService.cameraBind;
+                    if (bind.isNotEmpty) {
+                      NetworkService.sendCommand('RUN_MACRO:$bind');
+                    } else {
+                      NetworkService.sendCommand('CAMERA');
+                    }
+                  },
+                  onLongPress: () {
+                    _showBuiltInRecordDialog(
+                      PreferencesService.cameraBind,
+                      'Camera',
+                      (val) async => await PreferencesService.setCameraBind(val),
+                    );
+                  },
+                ));
+                gridItems.add(MacroButton(
+                  label: 'Scene 1', 
+                  icon: Icons.looks_one,
+                  onPressed: () => NetworkService.sendCommand('SCENE_1'),
+                ));
+                gridItems.add(MacroButton(
+                  label: 'Scene 2', 
+                  icon: Icons.looks_two,
+                  onPressed: () => NetworkService.sendCommand('SCENE_2'),
+                ));
+                gridItems.add(MacroButton(
+                  label: 'VOL-', 
+                  icon: Icons.volume_down,
+                  onPressed: () => NetworkService.sendCommand('VOLUME_DOWN'),
+                ));
+                gridItems.add(MacroButton(
+                  label: 'VOL+', 
+                  icon: Icons.volume_up,
+                  onPressed: () => NetworkService.sendCommand('VOLUME_UP'),
+                ));
                 
                 // 2. Custom buttons
                 for (int i = 0; i < _customMacros.length; i++) {
@@ -223,15 +387,11 @@ class _HomePageState extends State<HomePage> {
                       icon: getIconByName(macro.iconName),
                       isToggle: macro.isToggle,
                       onPressed: () {
-                        ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Triggered: ${macro.label}'),
-                            duration: const Duration(seconds: 1),
-                            backgroundColor: Colors.cyan,
-                            behavior: SnackBarBehavior.floating,
-                          ),
-                        );
+                        if (macro.keyCombo != null && macro.keyCombo!.isNotEmpty) {
+                          NetworkService.sendCommand('RUN_MACRO:${macro.keyCombo}');
+                        } else {
+                          NetworkService.sendCommand('CUSTOM:${macro.label}');
+                        }
                       },
                       onLongPress: () {
                         _showDeleteConfirmation(i, macro);
@@ -351,6 +511,8 @@ class _AddMacroDialogState extends State<AddMacroDialog> {
   final TextEditingController _nameController = TextEditingController();
   bool _isToggle = false;
   String _selectedIconName = 'keyboard';
+  String? _recordedCombo;
+  bool _isRecording = false;
 
   final List<Map<String, dynamic>> _availableIconsList = [
     {'name': 'keyboard', 'icon': Icons.keyboard},
@@ -376,12 +538,54 @@ class _AddMacroDialogState extends State<AddMacroDialog> {
     {'name': 'web', 'icon': Icons.web},
     {'name': 'code', 'icon': Icons.code},
     {'name': 'terminal', 'icon': Icons.terminal},
+    {'name': 'power', 'icon': Icons.power_settings_new},
+    {'name': 'lock', 'icon': Icons.lock_outline},
+    {'name': 'refresh', 'icon': Icons.refresh},
+    {'name': 'folder', 'icon': Icons.folder_open},
+    {'name': 'link', 'icon': Icons.link},
+    {'name': 'brightness', 'icon': Icons.brightness_6},
+    {'name': 'search', 'icon': Icons.search},
+    {'name': 'mic', 'icon': Icons.mic},
+    {'name': 'headset', 'icon': Icons.headset},
+    {'name': 'camera', 'icon': Icons.videocam},
+    {'name': 'timer', 'icon': Icons.timer_outlined},
+    {'name': 'speed', 'icon': Icons.speed},
+    {'name': 'security', 'icon': Icons.security},
+    {'name': 'notifications', 'icon': Icons.notifications_active},
+    {'name': 'discord', 'icon': Icons.forum},
   ];
 
   @override
   void dispose() {
     _nameController.dispose();
+    NetworkService.stopRecording();
     super.dispose();
+  }
+
+  void _startListening() {
+    setState(() {
+      _isRecording = true;
+    });
+    NetworkService.startRecording((combo) {
+      if (mounted) {
+        setState(() {
+          _recordedCombo = combo;
+          _isRecording = false;
+        });
+      }
+    });
+  }
+
+  void _cancelListening() {
+    NetworkService.stopRecording();
+    setState(() {
+      _isRecording = false;
+    });
+  }
+
+  List<String> get _recordedKeysList {
+    if (_recordedCombo == null || _recordedCombo!.isEmpty) return [];
+    return _recordedCombo!.split('+');
   }
 
   @override
@@ -419,7 +623,7 @@ class _AddMacroDialogState extends State<AddMacroDialog> {
                 ),
               ),
             ),
-            const SizedBox(height: 20.0),
+            const SizedBox(height: 16.0),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -441,6 +645,113 @@ class _AddMacroDialogState extends State<AddMacroDialog> {
                 ),
               ],
             ),
+            const SizedBox(height: 16.0),
+            const Text(
+              'Keyboard Bind',
+              style: TextStyle(
+                color: Colors.white70,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8.0),
+            if (_isRecording) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
+                decoration: BoxDecoration(
+                  color: Colors.cyan.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8.0),
+                  border: Border.all(color: Colors.cyan.withValues(alpha: 0.3)),
+                ),
+                child: Row(
+                  children: [
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.0,
+                        color: Colors.cyan,
+                      ),
+                    ),
+                    const SizedBox(width: 12.0),
+                    const Expanded(
+                      child: Text(
+                        'Recording... Press keys on PC',
+                        style: TextStyle(
+                          color: Colors.cyan,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13.0,
+                        ),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: _cancelListening,
+                      style: TextButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        minimumSize: const Size(50, 30),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text('Cancel', style: TextStyle(color: Colors.redAccent)),
+                    ),
+                  ],
+                ),
+              ),
+            ] else if (_recordedCombo != null) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(8.0),
+                decoration: BoxDecoration(
+                  color: Colors.grey[900],
+                  borderRadius: BorderRadius.circular(8.0),
+                  border: Border.all(color: Colors.white10),
+                ),
+                child: Wrap(
+                  spacing: 6.0,
+                  runSpacing: 6.0,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    for (var key in _recordedKeysList)
+                      Chip(
+                        label: Text(
+                          key.toUpperCase(),
+                          style: const TextStyle(
+                            color: Colors.cyan,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12.0,
+                          ),
+                        ),
+                        backgroundColor: Colors.black54,
+                        padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        deleteIcon: const Icon(
+                          Icons.cancel,
+                          size: 16.0,
+                          color: Colors.redAccent,
+                        ),
+                        onDeleted: () {
+                          setState(() {
+                            _recordedCombo = null;
+                          });
+                        },
+                      ),
+                  ],
+                ),
+              ),
+            ] else ...[
+              ElevatedButton.icon(
+                onPressed: _startListening,
+                icon: const Icon(Icons.fiber_manual_record, color: Colors.redAccent, size: 18),
+                label: const Text('Record a Macro'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.grey[900],
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(double.infinity, 44),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8.0),
+                    side: const BorderSide(color: Colors.white12),
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 16.0),
             const Text(
               'Select Icon',
@@ -509,11 +820,216 @@ class _AddMacroDialogState extends State<AddMacroDialog> {
               );
               return;
             }
-            Navigator.pop(context, CustomMacro(
-              label: name,
-              iconName: _selectedIconName,
-              isToggle: _isToggle,
-            ));
+            Navigator.pop(
+              context,
+              CustomMacro(
+                label: name,
+                iconName: _selectedIconName,
+                isToggle: _isToggle,
+                keyCombo: _recordedCombo,
+              ),
+            );
+          },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.cyan,
+            foregroundColor: Colors.black,
+          ),
+          child: const Text('Save', style: TextStyle(fontWeight: FontWeight.bold)),
+        ),
+      ],
+    );
+  }
+}
+
+class RecordBindDialog extends StatefulWidget {
+  final String title;
+  final String? initialBind;
+
+  const RecordBindDialog({
+    super.key,
+    required this.title,
+    this.initialBind,
+  });
+
+  @override
+  State<RecordBindDialog> createState() => _RecordBindDialogState();
+}
+
+class _RecordBindDialogState extends State<RecordBindDialog> {
+  String? _recordedCombo;
+  bool _isRecording = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _recordedCombo = widget.initialBind;
+  }
+
+  @override
+  void dispose() {
+    NetworkService.stopRecording();
+    super.dispose();
+  }
+
+  void _startListening() {
+    setState(() {
+      _isRecording = true;
+    });
+    NetworkService.startRecording((combo) {
+      if (mounted) {
+        setState(() {
+          _recordedCombo = combo;
+          _isRecording = false;
+        });
+      }
+    });
+  }
+
+  void _cancelListening() {
+    NetworkService.stopRecording();
+    setState(() {
+      _isRecording = false;
+    });
+  }
+
+  List<String> get _recordedKeysList {
+    if (_recordedCombo == null || _recordedCombo!.isEmpty) return [];
+    return _recordedCombo!.split('+');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: Colors.grey[950],
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20.0),
+        side: const BorderSide(color: Colors.cyan, width: 2.0),
+      ),
+      title: Text(
+        'BIND ${widget.title.toUpperCase()}',
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 2.0,
+        ),
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Press the button to record a key shortcut on your PC.',
+            style: TextStyle(color: Colors.white70, fontSize: 13.0),
+          ),
+          const SizedBox(height: 16.0),
+          if (_isRecording) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
+              decoration: BoxDecoration(
+                color: Colors.cyan.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8.0),
+                border: Border.all(color: Colors.cyan.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                children: [
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.0,
+                      color: Colors.cyan,
+                    ),
+                  ),
+                  const SizedBox(width: 12.0),
+                  const Expanded(
+                    child: Text(
+                      'Recording... Press keys on PC',
+                      style: TextStyle(
+                        color: Colors.cyan,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13.0,
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _cancelListening,
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      minimumSize: const Size(50, 30),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text('Cancel', style: TextStyle(color: Colors.redAccent)),
+                  ),
+                ],
+              ),
+            ),
+          ] else if (_recordedCombo != null && _recordedCombo!.isNotEmpty) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(8.0),
+              decoration: BoxDecoration(
+                color: Colors.grey[900],
+                borderRadius: BorderRadius.circular(8.0),
+                border: Border.all(color: Colors.white10),
+              ),
+              child: Wrap(
+                spacing: 6.0,
+                runSpacing: 6.0,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  for (var key in _recordedKeysList)
+                    Chip(
+                      label: Text(
+                        key.toUpperCase(),
+                        style: const TextStyle(
+                          color: Colors.cyan,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12.0,
+                        ),
+                      ),
+                      backgroundColor: Colors.black54,
+                      padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      deleteIcon: const Icon(
+                        Icons.cancel,
+                        size: 16.0,
+                        color: Colors.redAccent,
+                      ),
+                      onDeleted: () {
+                        setState(() {
+                          _recordedCombo = null;
+                        });
+                      },
+                    ),
+                ],
+              ),
+            ),
+          ] else ...[
+            ElevatedButton.icon(
+              onPressed: _startListening,
+              icon: const Icon(Icons.fiber_manual_record, color: Colors.redAccent, size: 18),
+              label: const Text('Record Bind'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.grey[900],
+                foregroundColor: Colors.white,
+                minimumSize: const Size(double.infinity, 44),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8.0),
+                  side: const BorderSide(color: Colors.white12),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+        ),
+        ElevatedButton(
+          onPressed: () {
+            Navigator.pop(context, _recordedCombo ?? '');
           },
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.cyan,
