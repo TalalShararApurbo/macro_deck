@@ -5,6 +5,7 @@ class PreferencesService {
 
   static const String _ipKey = 'pc_ip_address';
   static const String _portKey = 'pc_port';
+  static const String _customMacrosKey = 'custom_macros';
 
   // Call this method in main() before runApp
   static Future<void> init() async {
@@ -19,5 +20,10 @@ class PreferencesService {
   static String get pcPort => _prefs.getString(_portKey) ?? '';
   static Future<void> setPcPort(String value) async {
     await _prefs.setString(_portKey, value);
+  }
+
+  static List<String> get customMacros => _prefs.getStringList(_customMacrosKey) ?? [];
+  static Future<void> setCustomMacros(List<String> value) async {
+    await _prefs.setStringList(_customMacrosKey, value);
   }
 }

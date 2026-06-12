@@ -7,6 +7,7 @@ class MacroButton extends StatefulWidget {
   final IconData icon;
   final bool isToggle;
   final VoidCallback? onPressed;
+  final VoidCallback? onLongPress;
 
   const MacroButton({
     super.key,
@@ -14,6 +15,7 @@ class MacroButton extends StatefulWidget {
     required this.icon,
     this.isToggle = false,
     this.onPressed,
+    this.onLongPress,
   });
 
   @override
@@ -105,6 +107,7 @@ class _MacroButtonState extends State<MacroButton> with SingleTickerProviderStat
                 }
                 widget.onPressed?.call();
               },
+              onLongPress: widget.onLongPress,
               onHighlightChanged: (isHighlighted) {
                 _glowLingerTimer?.cancel();
                 if (isHighlighted) {
@@ -138,27 +141,44 @@ class _MacroButtonState extends State<MacroButton> with SingleTickerProviderStat
                 }
               },
               borderRadius: BorderRadius.circular(16.0),
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      widget.icon,
-                      size: 36.0,
-                      color: _isActive ? activeColor : Colors.white70,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final double buttonHeight = constraints.maxHeight;
+                  
+                  // Compute constraints-relative sizing
+                  final double iconSize = buttonHeight * 0.32;
+                  final double fontSize = buttonHeight * 0.11;
+                  final double spacing = buttonHeight * 0.08;
+                  
+                  return Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: buttonHeight * 0.08,
+                      vertical: buttonHeight * 0.06,
                     ),
-                    const SizedBox(height: 12.0),
-                    Text(
-                      widget.label,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14.0,
-                      ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          widget.icon,
+                          size: iconSize.clamp(16.0, 48.0),
+                          color: _isActive ? activeColor : Colors.white70,
+                        ),
+                        SizedBox(height: spacing.clamp(4.0, 16.0)),
+                        Text(
+                          widget.label,
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: fontSize.clamp(8.0, 15.0),
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  );
+                },
               ),
             ),
           ),
