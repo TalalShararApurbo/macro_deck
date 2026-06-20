@@ -41,4 +41,14 @@ class PreferencesService {
   static Future<void> setCameraBind(String value) async {
     await _prefs.setString('bind_camera', value);
   }
+
+  static List<String> get buttonLayout => _prefs.getStringList('button_layout') ?? [];
+  static Future<void> setButtonLayout(List<String> value) async {
+    await _prefs.setStringList('button_layout', value);
+  }
+
+  static List<String> get recentColors => _prefs.getStringList('recent_colors') ?? [];
+  static Future<void> setRecentColors(List<String> value) async {
+    await _prefs.setStringList('recent_colors', value);
+  }
 }

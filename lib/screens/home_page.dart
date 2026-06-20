@@ -1,40 +1,14 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../widgets/macro_button.dart';
+import '../widgets/color_wheel_picker.dart';
+import '../models/button_config.dart';
 import '../services/preferences_service.dart';
 import '../services/network_service.dart';
 import 'settings_page.dart';
-
-class CustomMacro {
-  final String label;
-  final String iconName;
-  final bool isToggle;
-  final String? keyCombo;
-
-  CustomMacro({
-    required this.label,
-    required this.iconName,
-    required this.isToggle,
-    this.keyCombo,
-  });
-
-  Map<String, dynamic> toJson() => {
-        'label': label,
-        'iconName': iconName,
-        'isToggle': isToggle,
-        'keyCombo': keyCombo,
-      };
-
-  factory CustomMacro.fromJson(Map<String, dynamic> json) {
-    return CustomMacro(
-      label: json['label'] as String? ?? 'New Macro',
-      iconName: json['iconName'] as String? ?? 'keyboard',
-      isToggle: json['isToggle'] as bool? ?? false,
-      keyCombo: json['keyCombo'] as String?,
-    );
-  }
-}
 
 IconData getIconByName(String name) {
   switch (name) {
@@ -64,6 +38,8 @@ IconData getIconByName(String name) {
       return Icons.stop;
     case 'volume_up':
       return Icons.volume_up;
+    case 'volume_down':
+      return Icons.volume_down;
     case 'volume_off':
       return Icons.volume_off;
     case 'lightbulb':
@@ -114,8 +90,37 @@ IconData getIconByName(String name) {
       return Icons.notifications_active;
     case 'discord':
       return Icons.forum;
+    case 'settings':
+      return Icons.settings;
+    case 'add':
+      return Icons.add;
     default:
       return Icons.help_outline;
+  }
+}
+
+String getDefaultCommand(String id) {
+  switch (id) {
+    case 'builtin_stream':
+      return 'STREAM';
+    case 'builtin_record':
+      return 'RECORD';
+    case 'builtin_mic_mute':
+      return 'MIC_MUTE';
+    case 'builtin_deafen':
+      return 'DEAFEN';
+    case 'builtin_camera':
+      return 'CAMERA';
+    case 'builtin_scene_1':
+      return 'SCENE_1';
+    case 'builtin_scene_2':
+      return 'SCENE_2';
+    case 'builtin_vol_down':
+      return 'VOLUME_DOWN';
+    case 'builtin_vol_up':
+      return 'VOLUME_UP';
+    default:
+      return '';
   }
 }
 
@@ -126,88 +131,357 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
-  List<CustomMacro> _customMacros = [];
+class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
+  List<MacroButtonConfig> _buttons = [];
+
+  // Drag and drop layout variables
+  int? _draggingIndex;
+  int? _hoveredIndex;
+  Offset _startGlobalPosition = Offset.zero;
+  double _startLeft = 0.0;
+  double _startTop = 0.0;
+  
+  String? _editingButtonId;
+  bool _capsuleExpanded = false;
+
+  // ValueNotifier for high-performance screen-refresh rate locked dragging
+  final ValueNotifier<Offset> _dragPositionNotifier = ValueNotifier(Offset.zero);
+
+  // Scroll controller for grid auto-scrolling
+  final ScrollController _scrollController = ScrollController();
+
+  // Ripple effect animation variables
+  late AnimationController _rippleController;
+  int? _rippleSourceIndex;
 
   @override
   void initState() {
     super.initState();
-    _loadCustomMacros();
+    _rippleController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+    _initButtonLayout();
   }
 
-  void _loadCustomMacros() {
-    final list = PreferencesService.customMacros;
-    setState(() {
-      _customMacros = list.map((item) {
-        try {
-          return CustomMacro.fromJson(jsonDecode(item));
-        } catch (e) {
-          return CustomMacro(label: 'Error', iconName: 'help', isToggle: false);
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    _rippleController.dispose();
+    _dragPositionNotifier.dispose();
+    super.dispose();
+  }
+
+  void _initButtonLayout() {
+    final layoutStrings = PreferencesService.buttonLayout;
+    if (layoutStrings.isNotEmpty) {
+      setState(() {
+        _buttons = layoutStrings.map((str) => MacroButtonConfig.fromJson(jsonDecode(str))).toList();
+      });
+    } else {
+      // Migrate or initialize default layout
+      final List<MacroButtonConfig> list = [];
+      
+      // 1. Built-in buttons
+      final builtinIds = [
+        'builtin_stream',
+        'builtin_record',
+        'builtin_mic_mute',
+        'builtin_deafen',
+        'builtin_camera',
+        'builtin_scene_1',
+        'builtin_scene_2',
+        'builtin_vol_down',
+        'builtin_vol_up',
+      ];
+      for (final id in builtinIds) {
+        String? keyCombo;
+        if (id == 'builtin_mic_mute') {
+          keyCombo = PreferencesService.micMuteBind;
+        } else if (id == 'builtin_deafen') {
+          keyCombo = PreferencesService.deafenBind;
+        } else if (id == 'builtin_camera') {
+          keyCombo = PreferencesService.cameraBind;
         }
-      }).toList();
+
+        list.add(MacroButtonConfig(
+          id: id,
+          type: 'builtin',
+          label: _getBuiltinLabel(id),
+          iconName: _getBuiltinIconName(id),
+          isToggle: _getBuiltinIsToggle(id),
+          keyCombo: keyCombo?.isNotEmpty == true ? keyCombo : null,
+        ));
+      }
+
+      // 2. Migrate existing custom macros
+      final oldCustomStrings = PreferencesService.customMacros;
+      for (int i = 0; i < oldCustomStrings.length; i++) {
+        try {
+          final oldJson = jsonDecode(oldCustomStrings[i]);
+          list.add(MacroButtonConfig(
+            id: 'custom_${DateTime.now().millisecondsSinceEpoch}_$i',
+            type: 'custom',
+            label: oldJson['label'] as String? ?? 'New Macro',
+            iconName: oldJson['iconName'] as String? ?? 'keyboard',
+            isToggle: oldJson['isToggle'] as bool? ?? false,
+            keyCombo: oldJson['keyCombo'] as String?,
+          ));
+        } catch (_) {}
+      }
+
+      // 3. Add system buttons
+      list.add(MacroButtonConfig(
+        id: 'system_settings',
+        type: 'system',
+        label: 'Settings',
+        iconName: 'settings',
+        isToggle: false,
+      ));
+      list.add(MacroButtonConfig(
+        id: 'system_add_new',
+        type: 'system',
+        label: 'ADD NEW',
+        iconName: 'add',
+        isToggle: false,
+      ));
+
+      setState(() {
+        _buttons = list;
+      });
+      _saveButtonLayout();
+    }
+  }
+
+  Future<void> _saveButtonLayout() async {
+    final list = _buttons.map((b) => jsonEncode(b.toJson())).toList();
+    await PreferencesService.setButtonLayout(list);
+  }
+
+  String _getBuiltinLabel(String id) {
+    switch (id) {
+      case 'builtin_stream': return 'Stream';
+      case 'builtin_record': return 'Record';
+      case 'builtin_mic_mute': return 'Mic Mute';
+      case 'builtin_deafen': return 'Deafen';
+      case 'builtin_camera': return 'Camera';
+      case 'builtin_scene_1': return 'Scene 1';
+      case 'builtin_scene_2': return 'Scene 2';
+      case 'builtin_vol_down': return 'VOL-';
+      case 'builtin_vol_up': return 'VOL+';
+      default: return '';
+    }
+  }
+
+  String _getBuiltinIconName(String id) {
+    switch (id) {
+      case 'builtin_stream': return 'sensors';
+      case 'builtin_record': return 'record';
+      case 'builtin_mic_mute': return 'mic_off';
+      case 'builtin_deafen': return 'headset_off';
+      case 'builtin_camera': return 'videocam_off';
+      case 'builtin_scene_1': return 'looks_one';
+      case 'builtin_scene_2': return 'looks_two';
+      case 'builtin_vol_down': return 'volume_down';
+      case 'builtin_vol_up': return 'volume_up';
+      default: return 'help';
+    }
+  }
+
+  bool _getBuiltinIsToggle(String id) {
+    return id == 'builtin_mic_mute' || id == 'builtin_deafen' || id == 'builtin_camera';
+  }
+
+  void _startEditing(String id) {
+    setState(() {
+      _editingButtonId = id;
+      _capsuleExpanded = true;
     });
   }
 
-  Future<void> _addCustomMacro(CustomMacro macro) async {
-    _customMacros.add(macro);
-    final list = _customMacros.map((m) => jsonEncode(m.toJson())).toList();
-    await PreferencesService.setCustomMacros(list);
-    setState(() {});
+  void _stopEditing() {
+    if (_editingButtonId == null) return;
+    setState(() {
+      _capsuleExpanded = false;
+    });
+    Future.delayed(const Duration(milliseconds: 200), () {
+      if (mounted && !_capsuleExpanded) {
+        setState(() {
+          _editingButtonId = null;
+        });
+      }
+    });
   }
 
-  Future<void> _deleteCustomMacro(int index) async {
-    _customMacros.removeAt(index);
-    final list = _customMacros.map((m) => jsonEncode(m.toJson())).toList();
-    await PreferencesService.setCustomMacros(list);
-    setState(() {});
-  }
-
-  void _showDeleteConfirmation(int index, CustomMacro macro) {
-    showDialog(
+  void _showDeleteConfirmation(int index, MacroButtonConfig button) {
+    showGeneralDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.grey[950],
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16.0),
-          side: const BorderSide(color: Colors.redAccent, width: 2.0),
-        ),
-        title: const Text(
-          'DELETE MACRO?',
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 2.0,
+      barrierDismissible: true,
+      barrierLabel: 'Dismiss',
+      barrierColor: Colors.black.withValues(alpha: 0.6),
+      transitionDuration: const Duration(milliseconds: 300),
+      pageBuilder: (context, anim1, anim2) {
+        return AlertDialog(
+          backgroundColor: Colors.grey[950],
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16.0),
+            side: const BorderSide(color: Colors.redAccent, width: 2.0),
           ),
-        ),
-        content: Text(
-          'Are you sure you want to delete "${macro.label}"?',
-          style: const TextStyle(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _deleteCustomMacro(index);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Macro "${macro.label}" deleted.'),
-                  backgroundColor: Colors.redAccent,
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.redAccent,
-              foregroundColor: Colors.white,
+          title: const Text(
+            'DELETE MACRO?',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 2.0,
             ),
-            child: const Text('Delete', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
-        ],
-      ),
+          content: Text(
+            'Are you sure you want to delete "${button.label}"?',
+            style: const TextStyle(color: Colors.white70),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+              },
+              child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _deleteButton(index);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Macro "${button.label}" deleted.'),
+                    backgroundColor: Colors.redAccent,
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.redAccent,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Delete', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+      transitionBuilder: (context, animation, secondaryAnimation, child) {
+        final curvedAnimation = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutBack,
+          reverseCurve: Curves.easeInBack,
+        );
+        final scaleAnimation = Tween<double>(begin: 0.3, end: 1.0).animate(curvedAnimation);
+        final fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+          CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOut,
+            reverseCurve: Curves.easeIn,
+          ),
+        );
+
+        return FadeTransition(
+          opacity: fadeAnimation,
+          child: ScaleTransition(
+            scale: scaleAnimation,
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+
+  void _deleteButton(int index) {
+    setState(() {
+      _buttons.removeAt(index);
+      _editingButtonId = null;
+      _capsuleExpanded = false;
+    });
+    _saveButtonLayout();
+  }
+
+  void _showColorPicker(int index, MacroButtonConfig button) {
+    final originalColor = button.customColor;
+    showGeneralDialog<Color>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Dismiss',
+      barrierColor: Colors.black.withValues(alpha: 0.6),
+      transitionDuration: const Duration(milliseconds: 300),
+      pageBuilder: (context, anim1, anim2) {
+        return ColorWheelPicker(
+          initialColor: originalColor ?? (button.isToggle ? Colors.redAccent : Colors.lightBlueAccent),
+          onColorChanged: (color) {
+            setState(() {
+              _buttons[index] = _buttons[index].copyWith(customColor: color);
+            });
+          },
+        );
+      },
+      transitionBuilder: (context, animation, secondaryAnimation, child) {
+        final curvedAnimation = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutBack,
+          reverseCurve: Curves.easeInBack,
+        );
+        final scaleAnimation = Tween<double>(begin: 0.3, end: 1.0).animate(curvedAnimation);
+        final fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+          CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOut,
+            reverseCurve: Curves.easeIn,
+          ),
+        );
+
+        return FadeTransition(
+          opacity: fadeAnimation,
+          child: ScaleTransition(
+            scale: scaleAnimation,
+            child: child,
+          ),
+        );
+      },
+    ).then((selectedColor) {
+      if (selectedColor == Colors.transparent) {
+        // Reset to default
+        setState(() {
+          _buttons[index] = _buttons[index].copyWith(clearColor: true);
+        });
+        _saveButtonLayout();
+        _stopEditing();
+      } else if (selectedColor != null) {
+        // Save selected color
+        setState(() {
+          _buttons[index] = _buttons[index].copyWith(customColor: selectedColor);
+        });
+        _saveButtonLayout();
+        _stopEditing();
+      } else {
+        // Revert live preview if canceled
+        setState(() {
+          if (originalColor == null) {
+            _buttons[index] = _buttons[index].copyWith(clearColor: true);
+          } else {
+            _buttons[index] = _buttons[index].copyWith(customColor: originalColor);
+          }
+        });
+      }
+    });
+  }
+
+  void _showBindDialog(int index, MacroButtonConfig button) {
+    _showBuiltInRecordDialog(
+      button.keyCombo ?? '',
+      button.label,
+      (val) async {
+        setState(() {
+          _buttons[index] = _buttons[index].copyWith(keyCombo: val.isNotEmpty ? val : '');
+        });
+        await _saveButtonLayout();
+        _stopEditing();
+      },
     );
   }
 
@@ -217,14 +491,21 @@ class _HomePageState extends State<HomePage> {
       barrierDismissible: true,
       barrierLabel: 'Dismiss',
       barrierColor: Colors.black.withValues(alpha: 0.6),
-      transitionDuration: const Duration(milliseconds: 350),
+      transitionDuration: const Duration(milliseconds: 300),
       transitionBuilder: (context, animation, secondaryAnimation, child) {
         final curvedAnimation = CurvedAnimation(
           parent: animation,
-          curve: Curves.fastOutSlowIn,
+          curve: Curves.easeOutBack,
+          reverseCurve: Curves.easeInBack,
         );
-        final scaleAnimation = Tween<double>(begin: 0.85, end: 1.0).animate(curvedAnimation);
-        final fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(curvedAnimation);
+        final scaleAnimation = Tween<double>(begin: 0.3, end: 1.0).animate(curvedAnimation);
+        final fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+          CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOut,
+            reverseCurve: Curves.easeIn,
+          ),
+        );
 
         return FadeTransition(
           opacity: fadeAnimation,
@@ -245,7 +526,7 @@ class _HomePageState extends State<HomePage> {
     if (result != null) {
       await onSave(result);
       if (mounted) {
-        setState(() {}); // Trigger rebuild to reflect any state variables
+        setState(() {}); 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Bind for $title updated to: ${result.isEmpty ? "Default Action" : result.toUpperCase()}'),
@@ -255,6 +536,116 @@ class _HomePageState extends State<HomePage> {
         );
       }
     }
+  }
+
+  void _addNewMacroDialog() async {
+    final MacroButtonConfig? newMacro = await showGeneralDialog<MacroButtonConfig>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Dismiss',
+      barrierColor: Colors.black.withValues(alpha: 0.6),
+      transitionDuration: const Duration(milliseconds: 300),
+      transitionBuilder: (context, animation, secondaryAnimation, child) {
+        final curvedAnimation = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutBack,
+          reverseCurve: Curves.easeInBack,
+        );
+        
+        final scaleAnimation = Tween<double>(begin: 0.3, end: 1.0).animate(curvedAnimation);
+        final fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+          CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOut,
+            reverseCurve: Curves.easeIn,
+          ),
+        );
+
+        return FadeTransition(
+          opacity: fadeAnimation,
+          child: ScaleTransition(
+            scale: scaleAnimation,
+            child: child,
+          ),
+        );
+      },
+      pageBuilder: (context, animation, secondaryAnimation) {
+        return const AddMacroDialog();
+      },
+    );
+    
+    if (newMacro != null) {
+      setState(() {
+        // Insert before system action buttons (Settings and ADD NEW)
+        int insertIndex = _buttons.indexWhere((b) => b.type == 'system');
+        if (insertIndex == -1) {
+          _buttons.add(newMacro);
+        } else {
+          _buttons.insert(insertIndex, newMacro);
+        }
+      });
+      await _saveButtonLayout();
+    }
+  }
+
+  void _navigateToSettings() {
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) => const SettingsPage(),
+        transitionDuration: const Duration(milliseconds: 300),
+        reverseTransitionDuration: const Duration(milliseconds: 300),
+        opaque: false,
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          final curvedAnimation = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutBack,
+            reverseCurve: Curves.easeInBack,
+          );
+          
+          final scaleAnimation = Tween<double>(begin: 0.3, end: 1.0).animate(curvedAnimation);
+          final fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+            CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeOut,
+              reverseCurve: Curves.easeIn,
+            ),
+          );
+
+          return FadeTransition(
+            opacity: fadeAnimation,
+            child: ScaleTransition(
+              scale: scaleAnimation,
+              child: child,
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  double getGlowPulseFactor(int index, int crossAxisCount) {
+    if (_rippleSourceIndex == null || !_rippleController.isAnimating) return 0.0;
+    
+    final sourceRow = _rippleSourceIndex! ~/ crossAxisCount;
+    final sourceCol = _rippleSourceIndex! % crossAxisCount;
+    final targetRow = index ~/ crossAxisCount;
+    final targetCol = index % crossAxisCount;
+    
+    final double distance = sqrt(pow(targetRow - sourceRow, 2) + pow(targetCol - sourceCol, 2));
+    
+    final double t = _rippleController.value;
+    final double maxDistance = 6.0; 
+    final double waveCenter = t * maxDistance;
+    final double waveWidth = 1.8;
+    
+    double intensity = 0.0;
+    final double distFromWave = (distance - waveCenter).abs();
+    if (distFromWave < waveWidth) {
+      intensity = 1.0 - (distFromWave / waveWidth);
+    }
+    
+    return intensity * (1.0 - t);
   }
 
   @override
@@ -276,227 +667,355 @@ class _HomePageState extends State<HomePage> {
         elevation: 0,
         centerTitle: true,
       ),
-      body: OrientationBuilder(
-        builder: (context, orientation) {
-          final isPortrait = orientation == Orientation.portrait;
-          return Center(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final double gridWidth = constraints.maxWidth > 800 ? 800 : constraints.maxWidth;
-                
-                final List<Widget> gridItems = [];
-                
-                // 1. Built-in buttons
-                gridItems.add(MacroButton(
-                  label: 'Stream', 
-                  icon: Icons.sensors,
-                  onPressed: () => NetworkService.sendCommand('STREAM'),
-                ));
-                gridItems.add(MacroButton(
-                  label: 'Record', 
-                  icon: Icons.fiber_manual_record,
-                  onPressed: () => NetworkService.sendCommand('RECORD'),
-                ));
-                gridItems.add(MacroButton(
-                  label: 'Mic Mute', 
-                  icon: Icons.mic_off, 
-                  isToggle: true,
-                  onPressed: () {
-                    final bind = PreferencesService.micMuteBind;
-                    if (bind.isNotEmpty) {
-                      NetworkService.sendCommand('RUN_MACRO:$bind');
-                    } else {
-                      NetworkService.sendCommand('MIC_MUTE');
-                    }
-                  },
-                  onLongPress: () {
-                    _showBuiltInRecordDialog(
-                      PreferencesService.micMuteBind,
-                      'Mic Mute',
-                      (val) async => await PreferencesService.setMicMuteBind(val),
-                    );
-                  },
-                ));
-                gridItems.add(MacroButton(
-                  label: 'Deafen', 
-                  icon: Icons.headset_off, 
-                  isToggle: true,
-                  onPressed: () {
-                    final bind = PreferencesService.deafenBind;
-                    if (bind.isNotEmpty) {
-                      NetworkService.sendCommand('RUN_MACRO:$bind');
-                    } else {
-                      NetworkService.sendCommand('DEAFEN');
-                    }
-                  },
-                  onLongPress: () {
-                    _showBuiltInRecordDialog(
-                      PreferencesService.deafenBind,
-                      'Deafen',
-                      (val) async => await PreferencesService.setDeafenBind(val),
-                    );
-                  },
-                ));
-                gridItems.add(MacroButton(
-                  label: 'Camera', 
-                  icon: Icons.videocam_off, 
-                  isToggle: true,
-                  onPressed: () {
-                    final bind = PreferencesService.cameraBind;
-                    if (bind.isNotEmpty) {
-                      NetworkService.sendCommand('RUN_MACRO:$bind');
-                    } else {
-                      NetworkService.sendCommand('CAMERA');
-                    }
-                  },
-                  onLongPress: () {
-                    _showBuiltInRecordDialog(
-                      PreferencesService.cameraBind,
-                      'Camera',
-                      (val) async => await PreferencesService.setCameraBind(val),
-                    );
-                  },
-                ));
-                gridItems.add(MacroButton(
-                  label: 'Scene 1', 
-                  icon: Icons.looks_one,
-                  onPressed: () => NetworkService.sendCommand('SCENE_1'),
-                ));
-                gridItems.add(MacroButton(
-                  label: 'Scene 2', 
-                  icon: Icons.looks_two,
-                  onPressed: () => NetworkService.sendCommand('SCENE_2'),
-                ));
-                gridItems.add(MacroButton(
-                  label: 'VOL-', 
-                  icon: Icons.volume_down,
-                  onPressed: () => NetworkService.sendCommand('VOLUME_DOWN'),
-                ));
-                gridItems.add(MacroButton(
-                  label: 'VOL+', 
-                  icon: Icons.volume_up,
-                  onPressed: () => NetworkService.sendCommand('VOLUME_UP'),
-                ));
-                
-                // 2. Custom buttons
-                for (int i = 0; i < _customMacros.length; i++) {
-                  final macro = _customMacros[i];
-                  gridItems.add(
-                    MacroButton(
-                      label: macro.label,
-                      icon: getIconByName(macro.iconName),
-                      isToggle: macro.isToggle,
-                      onPressed: () {
-                        if (macro.keyCombo != null && macro.keyCombo!.isNotEmpty) {
-                          NetworkService.sendCommand('RUN_MACRO:${macro.keyCombo}');
-                        } else {
-                          NetworkService.sendCommand('CUSTOM:${macro.label}');
+      body: RepaintBoundary(
+        child: SafeArea(
+          child: GestureDetector(
+            onTap: () {
+              if (_editingButtonId != null) {
+                _stopEditing();
+              }
+            },
+            child: OrientationBuilder(
+              builder: (context, orientation) {
+            final isPortrait = orientation == Orientation.portrait;
+            final int crossAxisCount = isPortrait ? 3 : 6;
+            
+            return Center(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  if (constraints.maxHeight <= 0 || constraints.maxWidth <= 0) {
+                    return const SizedBox.shrink();
+                  }
+                  final double gridWidth = constraints.maxWidth;
+                  
+                  final padding = const EdgeInsets.symmetric(horizontal: 24.0, vertical: 24.0);
+                  final double crossAxisSpacing = 20.0;
+                  final double mainAxisSpacing = 20.0;
+                  
+                  final double usableWidth = gridWidth - padding.left - padding.right - (crossAxisCount - 1) * crossAxisSpacing;
+                  final double buttonWidth = usableWidth / crossAxisCount;
+                  final double buttonHeight = buttonWidth; 
+                  
+                  final int rows = (_buttons.length / crossAxisCount).ceil();
+                  final double totalHeight = padding.top + padding.bottom + rows * buttonHeight + (rows - 1).clamp(0, 9999) * mainAxisSpacing;
+
+                  List<Widget> stackChildren = [];
+
+                  for (int i = 0; i < _buttons.length; i++) {
+                    final config = _buttons[i];
+
+                    // Calculate the visual slot index using virtual indices during layout
+                    int visualIndex = i;
+                    if (_draggingIndex != null && _hoveredIndex != null) {
+                      if (i == _draggingIndex) {
+                        visualIndex = _hoveredIndex!;
+                      } else if (_hoveredIndex! > _draggingIndex!) {
+                        if (i > _draggingIndex! && i <= _hoveredIndex!) {
+                          visualIndex = i - 1;
                         }
-                      },
-                      onLongPress: () {
-                        _showDeleteConfirmation(i, macro);
-                      },
+                      } else if (_hoveredIndex! < _draggingIndex!) {
+                        if (i >= _hoveredIndex! && i < _draggingIndex!) {
+                          visualIndex = i + 1;
+                        }
+                      }
+                    }
+
+                    final int col = visualIndex % crossAxisCount;
+                    final int row = visualIndex ~/ crossAxisCount;
+                    final double left = padding.left + col * (buttonWidth + crossAxisSpacing);
+                    final double top = padding.top + row * (buttonHeight + mainAxisSpacing);
+
+                    // Standard button widget with snappy animated position (180ms)
+                    stackChildren.add(
+                      AnimatedPositioned(
+                        key: ValueKey(config.id),
+                        duration: const Duration(milliseconds: 180),
+                        curve: Curves.easeOutCubic,
+                        left: left,
+                        top: top,
+                        width: buttonWidth,
+                        height: buttonHeight,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onLongPressStart: (details) {
+                            _dragPositionNotifier.value = Offset(left, top);
+                            setState(() {
+                              _startGlobalPosition = details.globalPosition;
+                              _startLeft = left;
+                              _startTop = top;
+                            });
+                            _startEditing(config.id);
+                            HapticFeedback.mediumImpact();
+                          },
+                          onLongPressMoveUpdate: (details) {
+                            final delta = details.globalPosition - _startGlobalPosition;
+
+                            // Threshold check to transition from static hold to dragging
+                            if (_draggingIndex == null) {
+                              if (delta.dx.abs() > 8.0 || delta.dy.abs() > 8.0) {
+                                HapticFeedback.selectionClick();
+                                setState(() {
+                                  _draggingIndex = i;
+                                  _hoveredIndex = i;
+                                });
+                              }
+                              return;
+                            }
+
+                            final currentLeft = _startLeft + delta.dx;
+                            final currentTop = _startTop + delta.dy;
+                            
+                            // High performance GPU-translated update
+                            _dragPositionNotifier.value = Offset(currentLeft, currentTop);
+
+                            // Auto-scroll logic if user drags close to screen edges
+                            final screenHeight = MediaQuery.of(context).size.height;
+                            final touchY = details.globalPosition.dy;
+                            if (touchY > screenHeight - 120) {
+                              if (_scrollController.hasClients && _scrollController.offset < _scrollController.position.maxScrollExtent) {
+                                _scrollController.jumpTo((_scrollController.offset + 8.0).clamp(0.0, _scrollController.position.maxScrollExtent));
+                              }
+                            } else if (touchY < 120) {
+                              if (_scrollController.hasClients && _scrollController.offset > 0.0) {
+                                _scrollController.jumpTo((_scrollController.offset - 8.0).clamp(0.0, _scrollController.position.maxScrollExtent));
+                              }
+                            }
+
+                            // Hover calculations
+                            final centerX = currentLeft + buttonWidth / 2;
+                            final centerY = currentTop + buttonHeight / 2;
+
+                            final hoverCol = ((centerX - padding.left) / (buttonWidth + crossAxisSpacing)).round();
+                            final hoverRow = ((centerY - padding.top) / (buttonHeight + mainAxisSpacing)).round();
+
+                            final int targetCol = hoverCol.clamp(0, crossAxisCount - 1);
+                            final int targetRow = hoverRow.clamp(0, (rows - 1).clamp(0, 9999));
+
+                            int hoveredIndex = targetRow * crossAxisCount + targetCol;
+                            hoveredIndex = hoveredIndex.clamp(0, _buttons.length - 1);
+
+                            if (_draggingIndex != null && hoveredIndex != _hoveredIndex) {
+                              HapticFeedback.lightImpact();
+                              setState(() {
+                                _hoveredIndex = hoveredIndex;
+                              });
+                            }
+                          },
+                          onLongPressEnd: (details) {
+                            if (_draggingIndex != null && _hoveredIndex != null) {
+                              final int finalIndex = _hoveredIndex!;
+                              final draggedItem = _buttons.removeAt(_draggingIndex!);
+                              _buttons.insert(finalIndex, draggedItem);
+                              HapticFeedback.heavyImpact();
+                              setState(() {
+                                _draggingIndex = null;
+                                _hoveredIndex = null;
+                                _rippleSourceIndex = finalIndex;
+                              });
+                              _rippleController.forward(from: 0.0);
+                              _saveButtonLayout();
+                            }
+                          },
+                          child: RepaintBoundary(
+                            child: AnimatedBuilder(
+                              animation: _rippleController,
+                              builder: (context, child) {
+                                final double ripplePulse = getGlowPulseFactor(i, crossAxisCount);
+                                return MacroButton(
+                                  label: config.label,
+                                  icon: getIconByName(config.iconName),
+                                  isToggle: config.isToggle,
+                                  customColor: config.customColor,
+                                  glowPulseFactor: ripplePulse,
+                                  isPlaceholder: _draggingIndex == i,
+                                  onPressed: () {
+                                    if (_editingButtonId != null) {
+                                      _stopEditing();
+                                      return;
+                                    }
+                                    if (config.type == 'system') {
+                                      if (config.id == 'system_settings') {
+                                        _navigateToSettings();
+                                      } else if (config.id == 'system_add_new') {
+                                        _addNewMacroDialog();
+                                      }
+                                    } else if (config.type == 'custom') {
+                                      if (config.keyCombo != null && config.keyCombo!.isNotEmpty) {
+                                        NetworkService.sendCommand('RUN_MACRO:${config.keyCombo}');
+                                      } else {
+                                        NetworkService.sendCommand('CUSTOM:${config.label}');
+                                      }
+                                    } else {
+                                      // Built-in
+                                      if (config.keyCombo != null && config.keyCombo!.isNotEmpty) {
+                                        NetworkService.sendCommand('RUN_MACRO:${config.keyCombo}');
+                                      } else {
+                                        NetworkService.sendCommand(getDefaultCommand(config.id));
+                                      }
+                                    }
+                                  },
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+
+                  // Render edit action capsule floating drawer
+                  if (_editingButtonId != null && _draggingIndex == null) {
+                    final editIdx = _buttons.indexWhere((b) => b.id == _editingButtonId);
+                    if (editIdx != -1) {
+                      final config = _buttons[editIdx];
+                      final int col = editIdx % crossAxisCount;
+                      final int row = editIdx ~/ crossAxisCount;
+                      final double left = padding.left + col * (buttonWidth + crossAxisSpacing);
+                      final double top = padding.top + row * (buttonHeight + mainAxisSpacing);
+                      
+                      final bool isLastColumn = (col == crossAxisCount - 1);
+                      final double capsuleWidth = 46.0;
+                      final double gap = 8.0;
+
+                      final double leftPos = isLastColumn ? (left - capsuleWidth - gap) : (left + buttonWidth + gap);
+
+                      stackChildren.add(
+                        AnimatedPositioned(
+                          key: const ValueKey('edit_action_capsule'),
+                          duration: const Duration(milliseconds: 180),
+                          curve: Curves.easeOutCubic,
+                          left: leftPos,
+                          top: top,
+                          width: capsuleWidth,
+                          height: buttonHeight,
+                          child: RepaintBoundary(
+                            child: EditActionCapsule(
+                              expanded: _capsuleExpanded,
+                              isLastColumn: isLastColumn,
+                              child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.85),
+                                borderRadius: BorderRadius.circular(23.0),
+                                border: Border.all(color: Colors.white12, width: 1.0),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Colors.black54,
+                                    blurRadius: 10.0,
+                                    spreadRadius: 1.0,
+                                  ),
+                                ],
+                              ),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                children: [
+                                  // Edit Button (Pencil Icon)
+                                  if (config.id == 'builtin_mic_mute' ||
+                                      config.id == 'builtin_deafen' ||
+                                      config.id == 'builtin_camera' ||
+                                      config.type == 'custom')
+                                    GestureDetector(
+                                      onTap: () => _showBindDialog(editIdx, config),
+                                      behavior: HitTestBehavior.opaque,
+                                      child: const SizedBox(
+                                        width: 38.0,
+                                        height: 28.0,
+                                        child: Icon(Icons.edit_rounded, color: Colors.amberAccent, size: 18.0),
+                                      ),
+                                    ),
+                                  // Color Picker Button
+                                  GestureDetector(
+                                    onTap: () => _showColorPicker(editIdx, config),
+                                    behavior: HitTestBehavior.opaque,
+                                    child: const SizedBox(
+                                      width: 38.0,
+                                      height: 28.0,
+                                      child: Icon(Icons.color_lens_rounded, color: Colors.cyanAccent, size: 18.0),
+                                    ),
+                                  ),
+                                  // Delete Button
+                                  if (config.type == 'custom')
+                                    GestureDetector(
+                                      onTap: () => _showDeleteConfirmation(editIdx, config),
+                                      behavior: HitTestBehavior.opaque,
+                                      child: const SizedBox(
+                                        width: 38.0,
+                                        height: 28.0,
+                                        child: Icon(Icons.delete_rounded, color: Colors.redAccent, size: 18.0),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                    }
+                  }
+
+                  // Render the dragged item on top of everything using high-performance GPU translation
+                  if (_draggingIndex != null) {
+                    final config = _buttons[_draggingIndex!];
+                    stackChildren.add(
+                      Positioned(
+                        key: ValueKey('dragged_${config.id}'),
+                        left: 0,
+                        top: 0,
+                        width: buttonWidth,
+                        height: buttonHeight,
+                        child: ValueListenableBuilder<Offset>(
+                          valueListenable: _dragPositionNotifier,
+                          builder: (context, dragOffset, child) {
+                            return Transform.translate(
+                              offset: dragOffset,
+                              child: child,
+                            );
+                          },
+                          child: Transform.scale(
+                            scale: 1.06,
+                            child: Opacity(
+                              opacity: 0.85,
+                              child: IgnorePointer(
+                                child: RepaintBoundary(
+                                  child: MacroButton(
+                                    label: config.label,
+                                    icon: getIconByName(config.iconName),
+                                    isToggle: config.isToggle,
+                                    customColor: config.customColor,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+
+                  return SizedBox(
+                    width: gridWidth,
+                    height: constraints.maxHeight,
+                    child: SingleChildScrollView(
+                      controller: _scrollController,
+                      physics: const BouncingScrollPhysics(),
+                      child: SizedBox(
+                        width: gridWidth,
+                        height: totalHeight,
+                        child: Stack(
+                          children: stackChildren,
+                        ),
+                      ),
                     ),
                   );
                 }
-                
-                // 3. System actions (Settings and ADD NEW)
-                gridItems.add(
-                  MacroButton(
-                    label: 'Settings', 
-                    icon: Icons.settings,
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        PageRouteBuilder(
-                          pageBuilder: (context, animation, secondaryAnimation) => const SettingsPage(),
-                          transitionDuration: const Duration(milliseconds: 350),
-                          reverseTransitionDuration: const Duration(milliseconds: 350),
-                          opaque: false,
-                          transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                            final curvedAnimation = CurvedAnimation(
-                              parent: animation,
-                              curve: Curves.fastOutSlowIn,
-                            );
-                            
-                            final scaleAnimation = Tween<double>(begin: 0.85, end: 1.0).animate(curvedAnimation);
-                            final fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(curvedAnimation);
-
-                            return FadeTransition(
-                              opacity: fadeAnimation,
-                              child: ScaleTransition(
-                                scale: scaleAnimation,
-                                child: child,
-                              ),
-                            );
-                          },
-                        ),
-                      );
-                    },
-                  ),
-                );
-                
-                gridItems.add(
-                  MacroButton(
-                    label: 'ADD NEW',
-                    icon: Icons.add,
-                    onPressed: () async {
-                      final CustomMacro? newMacro = await showGeneralDialog<CustomMacro>(
-                        context: context,
-                        barrierDismissible: true,
-                        barrierLabel: 'Dismiss',
-                        barrierColor: Colors.black.withValues(alpha: 0.6),
-                        transitionDuration: const Duration(milliseconds: 350),
-                        transitionBuilder: (context, animation, secondaryAnimation, child) {
-                          final curvedAnimation = CurvedAnimation(
-                            parent: animation,
-                            curve: Curves.fastOutSlowIn,
-                          );
-                          
-                          final scaleAnimation = Tween<double>(begin: 0.85, end: 1.0).animate(curvedAnimation);
-                          final fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(curvedAnimation);
-
-                          return FadeTransition(
-                            opacity: fadeAnimation,
-                            child: ScaleTransition(
-                              scale: scaleAnimation,
-                              child: child,
-                            ),
-                          );
-                        },
-                        pageBuilder: (context, animation, secondaryAnimation) {
-                          return const AddMacroDialog();
-                        },
-                      );
-                      
-                      if (newMacro != null) {
-                        await _addCustomMacro(newMacro);
-                      }
-                    },
-                  ),
-                );
-
-                return SizedBox(
-                  width: gridWidth,
-                  height: constraints.maxHeight,
-                  child: SafeArea(
-                    child: GridView.count(
-                      crossAxisCount: isPortrait ? 3 : 6,
-                      mainAxisSpacing: 20.0,
-                      crossAxisSpacing: 20.0,
-                      padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 24.0),
-                      shrinkWrap: false,
-                      physics: const BouncingScrollPhysics(),
-                      children: gridItems,
-                    ),
-                  ),
-                );
-              }
-            ),
-          );
-        }
+              ),
+            );
+          }
+        ),
       ),
-    );
+    ),
+  ),
+);
   }
 }
 
@@ -822,7 +1341,9 @@ class _AddMacroDialogState extends State<AddMacroDialog> {
             }
             Navigator.pop(
               context,
-              CustomMacro(
+              MacroButtonConfig(
+                id: 'custom_${DateTime.now().millisecondsSinceEpoch}',
+                type: 'custom',
                 label: name,
                 iconName: _selectedIconName,
                 isToggle: _isToggle,
@@ -1038,6 +1559,100 @@ class _RecordBindDialogState extends State<RecordBindDialog> {
           child: const Text('Save', style: TextStyle(fontWeight: FontWeight.bold)),
         ),
       ],
+    );
+  }
+}
+
+class EditActionCapsule extends StatefulWidget {
+  final Widget child;
+  final bool expanded;
+  final bool isLastColumn;
+
+  const EditActionCapsule({
+    super.key,
+    required this.child,
+    required this.expanded,
+    required this.isLastColumn,
+  });
+
+  @override
+  State<EditActionCapsule> createState() => _EditActionCapsuleState();
+}
+
+class _EditActionCapsuleState extends State<EditActionCapsule> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _curveAnimation;
+  late Animation<Offset> _slideAnimation;
+  late Animation<double> _scaleAnimation;
+  late Animation<double> _fadeAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+    );
+    
+    _curveAnimation = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutBack,
+      reverseCurve: Curves.easeInBack,
+    );
+
+    // Slide from offset to zero
+    // Since child is 46.0 wide, and maxOffset is 54.0.
+    // Slide transition offset is fractional: (46.0 + 8.0) / 46.0 = 1.1739
+    final double fractionalOffset = (46.0 + 8.0) / 46.0;
+    _slideAnimation = Tween<Offset>(
+      begin: Offset((widget.isLastColumn ? 1.0 : -1.0) * fractionalOffset, 0.0),
+      end: Offset.zero,
+    ).animate(_curveAnimation);
+
+    _scaleAnimation = Tween<double>(begin: 0.3, end: 1.0).animate(_curveAnimation);
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: Curves.easeOut,
+        reverseCurve: Curves.easeIn,
+      ),
+    );
+
+    if (widget.expanded) {
+      _controller.forward();
+    }
+  }
+
+  @override
+  void didUpdateWidget(EditActionCapsule oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.expanded != oldWidget.expanded) {
+      if (widget.expanded) {
+        _controller.forward();
+      } else {
+        _controller.reverse();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _fadeAnimation,
+      child: ScaleTransition(
+        scale: _scaleAnimation,
+        alignment: widget.isLastColumn ? Alignment.centerRight : Alignment.centerLeft,
+        child: SlideTransition(
+          position: _slideAnimation,
+          child: widget.child,
+        ),
+      ),
     );
   }
 }

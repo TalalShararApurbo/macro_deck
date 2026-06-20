@@ -8,6 +8,9 @@ class MacroButton extends StatefulWidget {
   final bool isToggle;
   final VoidCallback? onPressed;
   final VoidCallback? onLongPress;
+  final Color? customColor;
+  final double? glowPulseFactor;
+  final bool isPlaceholder;
 
   const MacroButton({
     super.key,
@@ -16,6 +19,9 @@ class MacroButton extends StatefulWidget {
     this.isToggle = false,
     this.onPressed,
     this.onLongPress,
+    this.customColor,
+    this.glowPulseFactor,
+    this.isPlaceholder = false,
   });
 
   @override
@@ -69,21 +75,80 @@ class _MacroButtonState extends State<MacroButton> with SingleTickerProviderStat
 
   @override
   Widget build(BuildContext context) {
-    final Color activeColor = (widget.isToggle && _isToggled) ? Colors.redAccent : Colors.lightBlueAccent;
+    if (widget.isPlaceholder) {
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16.0),
+              boxShadow: const [],
+            ),
+          ),
+          ScaleTransition(
+            scale: _scaleAnimation,
+            child: Card(
+              color: Colors.transparent,
+              elevation: 0,
+              margin: EdgeInsets.zero,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16.0),
+                side: const BorderSide(color: Colors.cyanAccent, width: 2.0),
+              ),
+              child: const Center(
+                child: Icon(Icons.crop_free_rounded, color: Colors.cyanAccent, size: 24),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    final Color activeColor = widget.customColor ?? ((widget.isToggle && _isToggled) ? Colors.redAccent : Colors.lightBlueAccent);
+    final bool isGlowing = _isActive || (widget.glowPulseFactor != null && widget.glowPulseFactor! > 0);
+    
+    final double currentGlowAlpha = (widget.glowPulseFactor != null && widget.glowPulseFactor! > 0)
+        ? 0.8 * widget.glowPulseFactor!
+        : 0.8;
+    final double currentGlowBlur = (widget.glowPulseFactor != null && widget.glowPulseFactor! > 0)
+        ? 16.0 * widget.glowPulseFactor!
+        : 16.0;
+    final double currentGlowSpread = (widget.glowPulseFactor != null && widget.glowPulseFactor! > 0)
+        ? 3.0 * widget.glowPulseFactor!
+        : 3.0;
+
+    // Card background is static: unaffected by whether button is active/glowing or not!
+    final Color cardBgColor = widget.customColor != null
+        ? Color.lerp(const Color(0xFF151515), widget.customColor, 0.08)!
+        : Colors.grey[900]!;
+
+    final Color iconColor = widget.customColor != null
+        ? (_isActive ? widget.customColor! : widget.customColor!.withValues(alpha: 0.65))
+        : (_isActive ? activeColor : Colors.white70);
+
+    final Color textColor = widget.customColor != null
+        ? Color.lerp(Colors.white, widget.customColor, _isActive ? 0.7 : 0.4)!
+        : Colors.white;
+
+    final bool isRippleActive = widget.glowPulseFactor != null && widget.glowPulseFactor! > 0;
+    final Duration containerDuration = isRippleActive
+        ? Duration.zero
+        : (_isActive ? const Duration(milliseconds: 50) : const Duration(milliseconds: 300));
 
     return Stack(
       fit: StackFit.expand,
       children: [
         AnimatedContainer(
-          duration: _isActive ? const Duration(milliseconds: 50) : const Duration(milliseconds: 300),
+          duration: containerDuration,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16.0),
-            boxShadow: _isActive
+            boxShadow: isGlowing
                 ? [
                     BoxShadow(
-                      color: activeColor.withValues(alpha: 0.8),
-                      blurRadius: 16.0,
-                      spreadRadius: 3.0,
+                      color: activeColor.withValues(alpha: currentGlowAlpha),
+                      blurRadius: currentGlowBlur,
+                      spreadRadius: currentGlowSpread,
                     ),
                   ]
                 : [],
@@ -92,7 +157,7 @@ class _MacroButtonState extends State<MacroButton> with SingleTickerProviderStat
         ScaleTransition(
           scale: _scaleAnimation,
           child: Card(
-            color: Colors.grey[900],
+            color: cardBgColor,
             elevation: 0,
             margin: EdgeInsets.zero,
             shape: RoundedRectangleBorder(
@@ -161,7 +226,7 @@ class _MacroButtonState extends State<MacroButton> with SingleTickerProviderStat
                         Icon(
                           widget.icon,
                           size: iconSize.clamp(16.0, 48.0),
-                          color: _isActive ? activeColor : Colors.white70,
+                          color: iconColor,
                         ),
                         SizedBox(height: spacing.clamp(4.0, 16.0)),
                         Text(
@@ -170,7 +235,7 @@ class _MacroButtonState extends State<MacroButton> with SingleTickerProviderStat
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            color: Colors.white,
+                            color: textColor,
                             fontWeight: FontWeight.bold,
                             fontSize: fontSize.clamp(8.0, 15.0),
                           ),

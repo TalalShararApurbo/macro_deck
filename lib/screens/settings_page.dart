@@ -57,9 +57,10 @@ class _SettingsPageState extends State<SettingsPage> {
         elevation: 0,
         centerTitle: true,
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16.0),
-        children: [
+      body: RepaintBoundary(
+        child: ListView(
+          padding: const EdgeInsets.all(16.0),
+          children: [
           const Text(
             'Network Configuration',
             style: TextStyle(
@@ -121,6 +122,7 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ],
       ),
-    );
+    ),
+  );
   }
 }
